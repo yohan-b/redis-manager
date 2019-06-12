@@ -2,7 +2,9 @@
 # -*- coding: utf-8 -*-
 # Author : Yohan Bataille (ING)
 # redis-manager
-version = "3"
+from __future__ import print_function
+
+version = "4"
 
 # Requires:
 # redis-cli
@@ -23,8 +25,17 @@ import traceback
 import pprint
 import urllib2
 from random import randint
+from threading import Lock
 
-print("redis manager version: " + version)
+xprint_lock = Lock()
+
+def xprint(*args, **kwargs):
+    """Thread safe print function"""
+    with xprint_lock:
+        print(*args, **kwargs)
+        sys.stdout.flush()
+
+xprint("redis manager version: " + version)
 
 # positional : REDIS_PATH, REDIS_NODES, ENV, HTTP_PORT (in this order, all mandatory, ENV : "DEV" or "PROD")
 # optional : time (-t), dry_run (-n)
@@ -65,14 +76,14 @@ if args.dry_run:
 redis_cli = args.REDIS_PATH
 http_port = int(args.HTTP_PORT)
 
-print("HTTP_PORT: " + str(http_port))
-print("REDIS_NODES: " + args.REDIS_NODES)
-print("all_checks: " + str(all_checks))
-print("loop_time: " + str(loop_time))
-print("failover_max_wait: " + str(failover_max_wait))
-print("other_managers: " + str(other_managers))
-print("redis_cli: " + redis_cli)
-print("test: " + str(test))
+xprint("HTTP_PORT: " + str(http_port))
+xprint("REDIS_NODES: " + args.REDIS_NODES)
+xprint("all_checks: " + str(all_checks))
+xprint("loop_time: " + str(loop_time))
+xprint("failover_max_wait: " + str(failover_max_wait))
+xprint("other_managers: " + str(other_managers))
+xprint("redis_cli: " + redis_cli)
+xprint("test: " + str(test))
 
 #[root@slzuss3vmq00 ~]# /opt/ZUTA0/Logiciel/RDI/bin/redis-cli -h 10.166.119.48 -p 7002 --raw CLUSTER INFO
 #cluster_state:fail
@@ -158,9 +169,9 @@ def main():
     current_cluster_topo = list()
 
     if all_checks:
-        print("PROD mode enabled: master imbalance correction by server and datacenter activated.")
+        xprint("PROD mode enabled: master imbalance correction by server and datacenter activated.")
     else:
-        print("DEV mode enabled: master imbalance correction by server and datacenter deactivated.")
+        xprint("DEV mode enabled: master imbalance correction by server and datacenter deactivated.")
 
     while True:
         last_loop_epoch = time.mktime(time.gmtime())
@@ -175,38 +186,39 @@ def main():
                         r2 = urllib2.urlopen('http://' + manager + '/request_active', None, 1)
                         l2 = r2.readlines()
                         if len(l2) == 1 and l2[0] == 'yes':
-                            print("other has requested activation")
+                            xprint("other has requested activation")
                             request_active = False
                             sleep = True
                 elif len(l) == 1 and l[0].split()[0] == 'active':
                     if num_manager_active == 0:
                         num_manager_active += 1
                     else:
-                        print("Too many active managers!")
+                        xprint("Too many active managers!")
                 elif len(l) == 1 and l[0].split()[0] == 'failed':
-                    print("manager " + manager + " is KO.")
+                    xprint("manager " + manager + " is KO.")
                 else:
-                    print("manager " + manager + " has answered with garbage: " + str(l))
+                    xprint("manager " + manager + " has answered with garbage: " + str(l))
             except:
-                print("manager " + manager + " is not responding.")
+                xprint("manager " + manager + " is not responding.")
         if num_manager_active == 0 and (manager_status == 'passive' or manager_status == 'starting'):
             if request_active:
-                print("Becoming active!")
+                xprint("Becoming active!")
                 manager_status = 'active'
+                request_active = False
             elif sleep:
-                print("Sleeping to let another manager activate.")
+                xprint("Sleeping to let another manager activate.")
                 time.sleep(randint(1, 10))
                 continue
             else:
                 request_active = True
-                print("Manager election in progress.")
+                xprint("Manager election in progress.")
                 time.sleep(randint(1, 10))
                 continue
         elif num_manager_active == 1 and manager_status == 'starting':
-            print("Manager election finished, we are passive!")
+            xprint("Manager election finished, we are passive!")
             manager_status = 'passive'
         elif num_manager_active >= 1 and manager_status == 'active':
-            print("Becoming passive!")
+            xprint("Becoming passive!")
             manager_status = 'passive'
 
         if sleep_until != 0:
@@ -214,14 +226,14 @@ def main():
             if delta <= 0:
                 sleep_until = 0
             else:
-                print("Sleeping as requested. " + str(delta) + " seconds remaining.")
+                xprint("Sleeping as requested. " + str(delta) + " seconds remaining.")
                 time.sleep(loop_time)
                 continue
 
         raw_topo, raw_topo_str = cluster_topo(startup_nodes_list, startup_nodes_by_datacenter)
         if raw_topo is None:
             cluster_state = 'Unknown state'
-            print('Critical failure: cannot get cluster topology. Doing nothing.')
+            xprint('Critical failure: cannot get cluster topology. Doing nothing.')
             time.sleep(loop_time)
             continue
         bool_cluster_online = cluster_online(startup_nodes_list)
@@ -229,17 +241,17 @@ def main():
             pass
         else:
             cluster_state = 'KO'
-            print('Cluster failure.')
+            xprint('Cluster failure.')
         # print(raw_topo_str)
         if not same_cluster(startup_nodes_list, raw_topo):
             pprint.pprint(raw_topo, width=300)
             cluster_state = 'Unknown cluster'
-            print('Not the exact cluster we know. Doing nothing.')
+            xprint('Not the exact cluster we know. Doing nothing.')
             time.sleep(loop_time)
             continue
         for node in raw_topo:
             if node_status(node) == 'cluster still assessing':
-                print('Something is going on but Redis Cluster is still assessing the situation. Doing nothing.')
+                xprint('Something is going on but Redis Cluster is still assessing the situation. Doing nothing.')
                 pprint.pprint(raw_topo, width=300)
                 time.sleep(loop_time)
                 continue
@@ -247,7 +259,7 @@ def main():
         if not bool_cluster_online:
             pprint.pprint(raw_topo, width=300)
             if has_quorum(raw_topo):
-                print("Cluster has quorum and can recover by itself. Doing nothing.")
+                xprint("Cluster has quorum and can recover by itself. Doing nothing.")
             else:
                 failed_masters = list()
                 new_failover_without_quorum_requested = list()
@@ -256,19 +268,19 @@ def main():
                         if master_status_of_slave(raw_topo, node) != 'ok':
                             masterid = masterid_of_slave(node)
                             if masterid in failed_masters:
-                                print("Slave " + node_name(node) + " does not see master " + node_name_from_id(raw_topo, masterid) + ", but a slave has already been promoted. Doing nothing.")
+                                xprint("Slave " + node_name(node) + " does not see master " + node_name_from_id(raw_topo, masterid) + ", but a slave has already been promoted. Doing nothing.")
                             elif manager_status == 'active':
                                 if failover_without_quorum_did_not_happen(raw_topo)["one_did_not_happen"]:
                                     if not failover_without_quorum_did_not_happen(raw_topo)["one_cleared"]:
-                                        print("Cluster did not comply with our previous failover request. Waiting.")
+                                        xprint("Cluster did not comply with our previous failover request. Waiting.")
                                 else:
-                                    print("Failed master: " + node_name_from_id(raw_topo, masterid) + ". Promoting slave " + node_name(node) + ".")
+                                    xprint("Failed master: " + node_name_from_id(raw_topo, masterid) + ". Promoting slave " + node_name(node) + ".")
                                     failover_without_quorum(node_ip(node), node_port(node))
                                     new_failover_without_quorum_requested.append({'slave': node_object_from_node_name(node_name(node)), 'epoch': time.mktime(time.gmtime())})
                                 failed_masters.append(masterid)
                 failover_without_quorum_requested = failover_without_quorum_requested + new_failover_without_quorum_requested
                 if failed_masters == list():
-                    print("Critical failure : no slave remaining, cannot do anything.")
+                    xprint("Critical failure : no slave remaining, cannot do anything.")
         else:
             # Detect risky situations
             failure = False
@@ -276,16 +288,16 @@ def main():
                 if node_role(node) == 'master' and node_status(node) == 'ok':
                     # Detect master without slave
                     if not master_has_at_least_one_slave(raw_topo, node):
-                        print("Master " + node_name(node) + " has no slave !")
+                        xprint("Master " + node_name(node) + " has no slave !")
                         failure = True
                 elif node_role(node) == 'slave' and all_checks:
                     # Detect slave on same server as master.
                     if node_ip(node) == node_ip_from_id(raw_topo, masterid_of_slave(node)):
-                        print("Slave " + node_name(node) + " is on the same server as master " + node_name_from_id(raw_topo, masterid_of_slave(node)))
+                        xprint("Slave " + node_name(node) + " is on the same server as master " + node_name_from_id(raw_topo, masterid_of_slave(node)))
                         failure = True
                     # Detect slave on same datacenter as master.
                     if node_datacenter(node) == node_datacenter_from_id(raw_topo, masterid_of_slave(node)):
-                        print("Slave " + node_name(node) + " is on the same datacenter as master " + node_name_from_id(raw_topo, masterid_of_slave(node)))
+                        xprint("Slave " + node_name(node) + " is on the same datacenter as master " + node_name_from_id(raw_topo, masterid_of_slave(node)))
                         failure = True
             if failure:
                 cluster_state = 'At risk'
@@ -295,7 +307,7 @@ def main():
                 pprint.pprint(raw_topo, width=300)
                 current_cluster_topo = raw_topo
             elif cluster_has_changed(current_cluster_topo, raw_topo):
-                print("Cluster topology has changed")
+                xprint("Cluster topology has changed")
                 pprint.pprint(raw_topo, width=300)
                 current_cluster_topo = raw_topo
             if plan != dict() and manager_status == 'active':
@@ -305,41 +317,41 @@ def main():
                 current_step = min(steps)
                 if not cluster_has_changed(current_cluster_topo, plan['0']['starting_topo']):
                     if failover_with_quorum_did_not_happen(raw_topo)["one_cleared"]:
-                        print("Cluster did not comply with our previous failover request. We reached the timeout. Plan Failed. Forget it.")
+                        xprint("Cluster did not comply with our previous failover request. We reached the timeout. Plan Failed. Forget it.")
                         plan = dict()
                     else:
-                        print("Still waiting for the cluster to proceed with the failover.")
+                        xprint("Still waiting for the cluster to proceed with the failover.")
                 elif cluster_has_changed(current_cluster_topo, plan[str(current_step)]['target_topo']):
-                    print("Cluster topology is not what we would expect. Something happened. Plan failed. Forget it.")
+                    xprint("Cluster topology is not what we would expect. Something happened. Plan failed. Forget it.")
                     plan = dict()
                 else:
                     if len(steps) > 1:
-                        print "Step " + str(current_step) + " succeeded."
+                        xprint("Step " + str(current_step) + " succeeded.")
                         del plan[str(current_step)]
-                        print "Launching step " + str(current_step + 1) + "."
+                        xprint("Launching step " + str(current_step + 1) + ".")
                         slave = plan[str(current_step + 1)]['slave']
                         master = plan[str(current_step + 1)]['master']
-                        print("Slave " + slave + " will replace his master " + master)
+                        xprint("Slave " + slave + " will replace his master " + master)
                         node_object = node_object_from_node_name(slave)
                         failover_with_quorum(node_object['host'], node_object['port'])
                         failover_with_quorum_requested.append({'slave': node_object, 'epoch': time.mktime(time.gmtime())})
                     else:
-                        print("Final step succeeded. The cluster is now balanced.")
-                        print("I love it when a plan comes together!")
+                        xprint("Final step succeeded. The cluster is now balanced.")
+                        xprint("I love it when a plan comes together!")
                         plan = dict()
                 time.sleep(loop_time)
                 continue
             if slave_only_engine is not None and manager_status == 'active':
                 if failover_without_quorum_did_not_happen(raw_topo)["one_did_not_happen"] or failover_with_quorum_did_not_happen(raw_topo)["one_did_not_happen"]:
                     if not failover_without_quorum_did_not_happen(raw_topo)["one_cleared"] and not failover_with_quorum_did_not_happen(raw_topo)["one_cleared"]:
-                        print("Cluster did not comply with our previous failover request. Waiting.")
+                        xprint("Cluster did not comply with our previous failover request. Waiting.")
                 else:
                     # Failover all master nodes on this engine
                     for node in raw_topo:
                         if node_role(node) == 'master' and node_status(node) == 'ok' and node_ip(node) == slave_only_engine:
                             slave = get_one_slave(raw_topo, node)
                             if slave is None:
-                                print("Master " + node_name(node) + " has no slave !")
+                                xprint("Master " + node_name(node) + " has no slave !")
                             else:
                                 failover_with_quorum(node_ip(slave), node_port(slave))
                                 failover_with_quorum_requested.append({'slave': node_object_from_node_name(node_name(slave)), 'epoch': time.mktime(time.gmtime())})
@@ -354,11 +366,11 @@ def main():
                         slave_only_engine = None
                         no_repartition_duration = 0
                     else:
-                        print("Skipping master imbalance correction as requested " + str(delta) + " seconds remaining.")
+                        xprint("Skipping master imbalance correction as requested " + str(delta) + " seconds remaining.")
                         time.sleep(loop_time)
                         continue
                 if slave_only_engine is not None:
-                    print("Still trying to remove slaves from " + slave_only_engine)
+                    xprint("Still trying to remove slaves from " + slave_only_engine)
                     time.sleep(loop_time)
                     continue
 
@@ -367,7 +379,7 @@ def main():
             if not all_checks:
                 pass
             elif len(startup_nodes_by_server) < 2:
-                print("Only one server: skipping master imbalance correction.")
+                xprint("Only one server: skipping master imbalance correction.")
             else:
                 server_master_repartition_dict = server_master_repartition(server_list(startup_nodes_by_server), raw_topo)
                 datacenter_master_repartition_dict = datacenter_master_repartition(datacenter_count(startup_nodes_by_datacenter), raw_topo)
@@ -377,26 +389,26 @@ def main():
                 if name is not None:
                     cluster_state = 'Imbalanced'
                     imbalanced = True
-                    print server_master_repartition_dict
+                    xprint(server_master_repartition_dict)
                     #pprint.pprint(raw_topo, width=300)
-                    print("Too many masters on server " + str(name) + ": " + str(master_count) + "/" + str(master_total_count))
+                    xprint("Too many masters on server " + str(name) + ": " + str(master_count) + "/" + str(master_total_count))
                     if manager_status == 'active':
                         master, slave = find_failover_candidate(raw_topo, server_master_repartition_dict, datacenter_master_repartition_dict, startup_nodes_by_server, startup_nodes_by_datacenter)
                         if master is None or slave is None:
-                            print("Could not find a failover solution.")
+                            xprint("Could not find a failover solution.")
                         else:
                             if failover_without_quorum_did_not_happen(raw_topo)["one_did_not_happen"] or failover_with_quorum_did_not_happen(raw_topo)["one_did_not_happen"]:
                                 if not failover_without_quorum_did_not_happen(raw_topo)["one_cleared"] and not failover_with_quorum_did_not_happen(raw_topo)["one_cleared"]:
-                                    print("Cluster did not comply with our previous failover request. Waiting.")
+                                    xprint("Cluster did not comply with our previous failover request. Waiting.")
                             else:
-                                print("Slave " + slave + " will replace his master " + master)
+                                xprint("Slave " + slave + " will replace his master " + master)
                                 node_object = node_object_from_node_name(slave)
                                 failover_with_quorum(node_object['host'], node_object['port'])
                                 failover_with_quorum_requested.append({'slave': node_object, 'epoch': time.mktime(time.gmtime())})
                     time.sleep(loop_time)
                     continue
                 if len(startup_nodes_by_datacenter) < 2:
-                    print("Only one datacenter: skipping master imbalance correction by datacenter.")
+                    xprint("Only one datacenter: skipping master imbalance correction by datacenter.")
                 else:
                     # Detect too many masters on a datacenter.
                     # It is possible to have no imbalance by server but an imbalance by datacenter (+1 master on each server of a datacenter compared to the other and at least 2 servers by datacenter).
@@ -404,17 +416,17 @@ def main():
                     if name is not None:
                         cluster_state = 'Imbalanced'
                         imbalanced = True
-                        print("Too many masters on datacenter " + str(name) + ": " + str(master_count) + "/" + str(master_total_count))
+                        xprint("Too many masters on datacenter " + str(name) + ": " + str(master_count) + "/" + str(master_total_count))
                         if manager_status == 'active':
                             master, slave = find_failover_candidate(raw_topo, server_master_repartition_dict, datacenter_master_repartition_dict, startup_nodes_by_server, startup_nodes_by_datacenter)
                             if master is None or slave is None:
-                                print("Could not find a failover solution.")
+                                xprint("Could not find a failover solution.")
                             else:
                                 if failover_without_quorum_did_not_happen(raw_topo)["one_did_not_happen"] or failover_with_quorum_did_not_happen(raw_topo)["one_did_not_happen"]:
                                     if not failover_without_quorum_did_not_happen(raw_topo)["one_cleared"] and not failover_with_quorum_did_not_happen(raw_topo)["one_cleared"]:
-                                        print("Cluster did not comply with our previous failover request. Waiting.")
+                                        xprint("Cluster did not comply with our previous failover request. Waiting.")
                                 else:
-                                    print("Slave " + slave + " will replace his master " + master)
+                                    xprint("Slave " + slave + " will replace his master " + master)
                                     node_object = node_object_from_node_name(slave)
                                     failover_with_quorum(node_object['host'], node_object['port'])
                                     failover_with_quorum_requested.append({'slave': node_object, 'epoch': time.mktime(time.gmtime())})
@@ -438,7 +450,7 @@ def failover_without_quorum_did_not_happen(raw_topo):
         if found_node_role == 'master':
             failover_without_quorum_requested.remove(slave_dict)
         elif time.mktime(time.gmtime()) - slave_dict['epoch'] > failover_max_wait:
-            print("Cluster has not performed failover for slave " + node_name_from_node_object(slave_dict['slave']) + " requested " + str(failover_max_wait) + " seconds ago. Removing the failover request.")
+            xprint("Cluster has not performed failover for slave " + node_name_from_node_object(slave_dict['slave']) + " requested " + str(failover_max_wait) + " seconds ago. Removing the failover request.")
             failover_without_quorum_requested.remove(slave_dict)
             one_cleared = True
         else:
@@ -459,7 +471,7 @@ def failover_with_quorum_did_not_happen(raw_topo):
         if found_node_role == 'master':
             failover_with_quorum_requested.remove(slave_dict)
         elif time.mktime(time.gmtime()) - slave_dict['epoch'] > failover_max_wait:
-            print("Cluster has not performed failover for slave " + node_name_from_node_object(slave_dict['slave']) + " requested " + str(failover_max_wait) + " seconds ago. Removing the failover request.")
+            xprint("Cluster has not performed failover for slave " + node_name_from_node_object(slave_dict['slave']) + " requested " + str(failover_max_wait) + " seconds ago. Removing the failover request.")
             failover_with_quorum_requested.remove(slave_dict)
             one_cleared = True
         else:
@@ -513,43 +525,43 @@ def find_failover_candidate(raw_topo, server_master_repartition_dict, datacenter
     raw_topo_permut_dict = copy.deepcopy(solution_steps_chain)
     for i in range(0, max_steps):
         if debug:
-            print(i)
+            xprint(i)
         j = 0
         raw_topo_1_permutations = dict()
         for position, raw_topo_permut in raw_topo_permut_dict.iteritems():
             if debug:
-                print("start position: ")
+                xprint("start position: ")
                 pprint.pprint(raw_topo_permut, width=300)
                 server_master_repartition_dict = server_master_repartition(server_list(startup_nodes_by_server), raw_topo_permut)
-                print server_master_repartition_dict
+                xprint(server_master_repartition_dict)
                 datacenter_master_repartition_dict = datacenter_master_repartition(datacenter_count(startup_nodes_by_datacenter), raw_topo_permut)
-                print datacenter_master_repartition_dict
+                xprint(datacenter_master_repartition_dict)
             # This only returns masters and slaves with node_status(master) == 'ok' or 'cluster still assessing' and node_status(slave) == 'ok' or 'cluster still assessing':
             master_slaves_dict = master_slaves_topo(raw_topo_permut)
             # generate all 1-permutation sets
             for master in master_slaves_dict:
                 if debug:
-                    print("master: " + str(master))
+                    xprint("master: " + str(master))
                 for slave in master_slaves_dict[master]:
                     raw_topo_copy = copy.deepcopy(raw_topo_permut)
                     raw_topo_1_permutation = simul_failover(master, slave, raw_topo_copy)
                     if debug:
-                        print("slave: " + str(slave))
+                        xprint("slave: " + str(slave))
                         server_master_repartition_dict = server_master_repartition(server_list(startup_nodes_by_server), raw_topo_1_permutation)
-                        print server_master_repartition_dict
+                        xprint(server_master_repartition_dict)
                         datacenter_master_repartition_dict = datacenter_master_repartition(datacenter_count(startup_nodes_by_datacenter), raw_topo_1_permutation)
-                        print datacenter_master_repartition_dict
+                        xprint(datacenter_master_repartition_dict)
                         pprint.pprint(raw_topo_1_permutation, width=300)
                     j += 1
                     if not raw_topo_1_permutation in solution_steps_chain.values():
                         #print "not already stored"
                         if solver_check(raw_topo_1_permutation, startup_nodes_by_server, startup_nodes_by_datacenter):
-                            print("Found a solution: ")
+                            xprint("Found a solution: ")
                             pprint.pprint(raw_topo_1_permutation, width=300)
                             # return the first step
                             if i == 0:
-                                print("Sounds like a plan !")
-                                print "only one step : " + str([master, slave])
+                                xprint("Sounds like a plan !")
+                                xprint("only one step : " + str([master, slave]))
                                 plan['0'] = {'starting_topo': copy.deepcopy(raw_topo)}
                                 plan['1'] = {'master': master, 'slave': slave, 'target_topo': raw_topo_1_permutation}
                                 return master, slave
@@ -562,20 +574,20 @@ def find_failover_candidate(raw_topo, server_master_repartition_dict, datacenter
                                 #print("slave: "+master_slave_steps_chain['0.'+first][1])
                                 step_key = '0'
                                 step_number = 1
-                                print("Sounds like a plan !")
+                                xprint("Sounds like a plan !")
                                 end_position = position+'.'+str(j)
                                 solution_steps_chain[end_position] = raw_topo_1_permutation
                                 master_slave_steps_chain[end_position] = [master, slave]
                                 plan['0'] = {'starting_topo': copy.deepcopy(raw_topo)}
                                 for step in end_position.split('.')[1:]:
                                     step_key += '.'+step
-                                    print "step "+str(step_number) + ": " + str(master_slave_steps_chain[step_key])
+                                    xprint("step "+str(step_number) + ": " + str(master_slave_steps_chain[step_key]))
                                     plan[str(step_number)] = {'master': master_slave_steps_chain[step_key][0], 'slave': master_slave_steps_chain[step_key][1], 'target_topo': solution_steps_chain[step_key]}
                                     step_number += 1
                                 return master_slave_steps_chain['0.'+first][0], master_slave_steps_chain['0.'+first][1]
                         else:
                             if debug:
-                                print "============== store permutation ============="
+                                xprint("============== store permutation =============")
                             solution_steps_chain[position+'.'+str(j)] = raw_topo_1_permutation
                             master_slave_steps_chain[position+'.'+str(j)] = [master, slave]
                             raw_topo_1_permutations[position+'.'+str(j)] = raw_topo_1_permutation
@@ -587,10 +599,10 @@ def solver_check(raw_topo_1_permutation, startup_nodes_by_server, startup_nodes_
     server_master_repartition_dict = server_master_repartition(server_list(startup_nodes_by_server), raw_topo_1_permutation)
     datacenter_master_repartition_dict = datacenter_master_repartition(datacenter_count(startup_nodes_by_datacenter), raw_topo_1_permutation)
     if debug:
-        print "solver_check"
+        xprint("solver_check")
         pprint.pprint(raw_topo_1_permutation, width=300)
-        print server_master_repartition_dict
-        print datacenter_master_repartition_dict
+        xprint(server_master_repartition_dict)
+        xprint(datacenter_master_repartition_dict)
     name_server, master_count_server, master_total_count = detect_imbalance(server_master_repartition_dict)
     name_datacenter, master_count_datacenter, master_total_count = detect_imbalance(datacenter_master_repartition_dict)
     if name_server is None and name_datacenter is None:
@@ -606,7 +618,7 @@ def simul_failover(master, slave, raw_topo):
         elif node_name(node) == slave:
             switch_role(node)
     if raw_topo_copy == raw_topo:
-        print("Failed")
+        xprint("Failed")
     #print("raw_topo_copy: " + str(raw_topo_copy))
     #print("raw_topo: " + str(raw_topo))
     return raw_topo
@@ -676,18 +688,18 @@ def append_datacenter(raw_topo, startup_nodes_by_datacenter):
 
 def same_cluster(startup_nodes_list, raw_topo):
     if len(startup_nodes_list) != len(raw_topo):
-        print('Found a different number of nodes.')
+        xprint('Found a different number of nodes.')
         return False
     for node in raw_topo:
         if node_name(node) not in [node['host'] + ':' + node['port'] for node in startup_nodes_list]:
-            print(node_name(node) + ' found but unknown.')
+            xprint(node_name(node) + ' found but unknown.')
             return False
     return True
 
 
 def cluster_has_changed(current_cluster_topo, raw_topo):
     if len(current_cluster_topo) != len(raw_topo):
-        print('Found a different number of nodes.')
+        xprint('Found a different number of nodes.')
         return True
     for node in raw_topo:
         found = False
@@ -877,7 +889,7 @@ def get_datacenter_for_node(node, startup_nodes_by_datacenter):
 
 # ip, port of the slave that will replace his master
 def failover_without_quorum(ip, port):
-    print(redis_cli + " -h " + ip + " -p " + port + " --raw CLUSTER FAILOVER TAKEOVER")
+    xprint(redis_cli + " -h " + ip + " -p " + port + " --raw CLUSTER FAILOVER TAKEOVER")
     if not test:
         proc = Popen(["timeout", "1", redis_cli, "-h", ip, "-p", port, "--raw", "CLUSTER", "FAILOVER", "TAKEOVER"], stdout=PIPE)
         result = proc.communicate()[0].split()
@@ -885,7 +897,7 @@ def failover_without_quorum(ip, port):
 
 # ip, port of the slave that will replace his master
 def failover_with_quorum(ip, port):
-    print(redis_cli + " -h " + ip + " -p " + port + " --raw CLUSTER FAILOVER")
+    xprint(redis_cli + " -h " + ip + " -p " + port + " --raw CLUSTER FAILOVER")
     if not test:
         proc = Popen(["timeout", "1", redis_cli, "-h", ip, "-p", port, "--raw", "CLUSTER", "FAILOVER"], stdout=PIPE)
         result = proc.communicate()[0].split()
@@ -948,7 +960,7 @@ class MyHandler(BaseHTTPRequestHandler):
             self.end_headers()
             delta = time.mktime(time.gmtime()) - last_loop_epoch
             if delta > unresponsive_timeout:
-                print("manager main loop is unresponsive!")
+                xprint("manager main loop is unresponsive!")
                 answer = "failed"
                 cluster_state = 'Unknown state'
                 request_active = False
@@ -1006,7 +1018,7 @@ class MyHandler(BaseHTTPRequestHandler):
                     self.end_headers()
                     self.wfile.write("CANNOT PROCEED: failed manager")
                 elif no_repartition_duration != 0 and slave_only_engine != slave_only_engine_req:
-                    print("A request has already been made to only have slaves on engine " + slave_only_engine + ".")
+                    xprint("A request has already been made to only have slaves on engine " + slave_only_engine + ".")
                     self.send_response(403)
                     self.send_header('Content-type', 'text/plain')
                     self.end_headers()
@@ -1027,7 +1039,7 @@ class MyHandler(BaseHTTPRequestHandler):
             self.send_response(404)
     def log_message(self, format, *args):
         if debug:
-            sys.stderr.write("%s - - [%s] %s\n" %
+            xprint("%s - - [%s] %s" %
                  (self.address_string(),
                   self.log_date_time_string(),
                   format%args))
@@ -1066,17 +1078,17 @@ if __name__ == "__main__":
     webserver_thread = WebThread()
     webserver_thread.start()
     
-    print(api_help())
+    xprint(api_help())
     try:
         main()
     except KeyboardInterrupt:
-        print 'Interrupted'
+        xprint('Interrupted')
         httpd.shutdown()
         httpd.server_close()
         sys.exit(0)
     except:
-        print 'We crashed!'
-        print traceback.format_exc()
+        xprint('We crashed!')
+        xprint(traceback.format_exc())
         httpd.shutdown()
         httpd.server_close()
         sys.exit(0)
