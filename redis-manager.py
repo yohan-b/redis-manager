@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 # Author : Yohan Bataille (ING)
-# redis-manager v2
+# redis-manager
+version = "3"
 
 # Requires:
 # redis-cli
@@ -23,6 +24,7 @@ import pprint
 import urllib2
 from random import randint
 
+print("redis manager version: " + version)
 
 # positional : REDIS_PATH, REDIS_NODES, ENV, HTTP_PORT (in this order, all mandatory, ENV : "DEV" or "PROD")
 # optional : time (-t), dry_run (-n)
@@ -130,6 +132,8 @@ def api_help():
 #                      'CANNOT PROCEED: passive manager'
 # example : /prepare_for_reboot/10.166.20.120&duration=300
 
+# /version : redis manager version
+
 """
 
 # TODO: Remove global variables.
@@ -201,7 +205,7 @@ def main():
         elif num_manager_active == 1 and manager_status == 'starting':
             print("Manager election finished, we are passive!")
             manager_status = 'passive'
-        elif num_manager_active > 1 and manager_status == 'active':
+        elif num_manager_active >= 1 and manager_status == 'active':
             print("Becoming passive!")
             manager_status = 'passive'
 
@@ -923,6 +927,11 @@ class MyHandler(BaseHTTPRequestHandler):
         elif self.path == '/debug/disable':
             self.send_response(200)
             debug = False
+        elif self.path == '/version':
+            self.send_response(200)
+            self.send_header('Content-type', 'text/plain')
+            self.end_headers()
+            self.wfile.write(version+'\n')
         elif self.path == '/help':
             self.send_response(200)
             self.send_header('Content-type', 'text/plain')
@@ -932,7 +941,7 @@ class MyHandler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header('Content-type', 'text/plain')
             self.end_headers()
-            self.wfile.write(cluster_state)
+            self.wfile.write(cluster_state+'\n')
         elif self.path == '/manager_status':
             self.send_response(200)
             self.send_header('Content-type', 'text/plain')
